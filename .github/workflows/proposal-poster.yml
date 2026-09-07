@@ -1,14 +1,4 @@
 name: proposal-poster
-
-# Secrets (both on this fork):
-#   CONTENT_PAT  — sadiib-side token with Contents R/W on sadiib/proposals
-#                  (classic `repo`, or fine-grained scoped to that repo).
-#                  Used ONLY for checking out the private content and pushing
-#                  state back. Never used for upstream posting.
-#   M00RISH_PAT  — M00rish classic PAT (`public_repo` suffices). Used ONLY to
-#                  authenticate gh for upstream reads + posting. The job aborts
-#                  unless gh resolves to M00rish (strict gate in post.sh).
-
 on:
   schedule:
     - cron: "*/5 * * * *"
@@ -30,12 +20,9 @@ on:
         description: "Proposal markdown (re-arm actions only)"
         required: false
         default: ""
-
-# Serializes ticks so two runs can never evaluate/post concurrently.
 concurrency:
   group: proposal-poster
   cancel-in-progress: false
-
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -46,20 +33,16 @@ jobs:
           repository: sadiib/proposals
           token: ${{ secrets.CONTENT_PAT }}
           path: content
-
       - name: Run poster
         working-directory: content
         env:
-          # gh authenticates from GH_TOKEN directly (no `gh auth login`, whose
-          # token validation demands scopes the posting token doesn't need).
-          # post.sh's strict gate still proves the token resolves to M00rish.
           GH_TOKEN: ${{ secrets.M00RISH_PAT }}
           MODE: ${{ github.event.inputs.mode || vars.POSTER_MODE || 'dry-run' }}
           DISPATCH_ACTION: ${{ github.event.inputs.action || 'none' }}
           DISPATCH_ISSUE: ${{ github.event.inputs.issue_number || '' }}
           DISPATCH_BODY: ${{ github.event.inputs.proposal_body || '' }}
+          GITHUB_STEP_SUMMARY: ""
         run: ./proposal-bot/post.sh
-
       - name: Commit state back to private repo
         working-directory: content
         run: |
