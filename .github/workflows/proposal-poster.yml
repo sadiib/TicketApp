@@ -2,6 +2,8 @@ name: proposal-poster
 on:
   schedule:
     - cron: "*/5 * * * *"
+  repository_dispatch:
+    types: [poll]
   workflow_dispatch:
     inputs:
       mode:
@@ -54,3 +56,4 @@ jobs:
           git -c user.name="proposal-poster" -c user.email="proposal-poster@users.noreply.github.com" \
             commit -m "proposal-poster: update state $(date -u +%FT%TZ)"
           git push
+
