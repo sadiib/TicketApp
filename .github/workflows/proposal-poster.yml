@@ -44,7 +44,7 @@ jobs:
           GITHUB_STEP_SUMMARY: ""
           # cron-job.org can only fire once a minute, so each run keeps checking labels for
           # LOOP_SECONDS and posts as soon as Help Wanted appears (worst case ~POLL_SECONDS late).
-          LOOP_SECONDS: "40"
+          LOOP_SECONDS: "50"
           POLL_SECONDS: "8"
         run: |
           ./proposal-bot/post.sh
