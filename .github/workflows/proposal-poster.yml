@@ -42,7 +42,20 @@ jobs:
           DISPATCH_ISSUE: ${{ github.event.inputs.issue_number || '' }}
           DISPATCH_BODY: ${{ github.event.inputs.proposal_body || '' }}
           GITHUB_STEP_SUMMARY: ""
-        run: ./proposal-bot/post.sh
+          # cron-job.org can only fire once a minute, so each run keeps checking labels for
+          # LOOP_SECONDS and posts as soon as Help Wanted appears (worst case ~POLL_SECONDS late).
+          LOOP_SECONDS: "40"
+          POLL_SECONDS: "8"
+        run: |
+          ./proposal-bot/post.sh
+          end=$((SECONDS + LOOP_SECONDS))
+          while (( SECONDS + POLL_SECONDS < end )); do
+            sleep "$POLL_SECONDS"
+            if ./proposal-bot/watch.sh; then
+              # The dispatch action (re-arm) only applies to the first run above.
+              DISPATCH_ACTION=none ./proposal-bot/post.sh
+            fi
+          done
       - name: Commit state back to private repo
         working-directory: content
         run: |
