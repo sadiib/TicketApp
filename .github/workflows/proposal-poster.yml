@@ -30,9 +30,12 @@ jobs:
       - name: Check out private content
         uses: actions/checkout@v5
         with:
-          repository: sadiib/proposals
-          token: ${{ secrets.CONTENT_PAT }}
+          repository: M00rish/Dscan
+          token: ${{ secrets.DSCAN_PAT }}
           path: content
+          sparse-checkout: |
+            proposal-bot
+            proposals
       - name: Run poster
         working-directory: content
         env:
@@ -42,10 +45,11 @@ jobs:
           DISPATCH_ISSUE: ${{ github.event.inputs.issue_number || '' }}
           DISPATCH_BODY: ${{ github.event.inputs.proposal_body || '' }}
           GITHUB_STEP_SUMMARY: ""
-          # cron-job.org can only fire once a minute, so each run keeps checking labels for
-          # LOOP_SECONDS and posts as soon as Help Wanted appears (worst case ~POLL_SECONDS late).
-          LOOP_SECONDS: "50"
-          POLL_SECONDS: "8"
+          # Each run polls for ~5 minutes; cron-job.org dispatches every minute and the
+          # concurrency group keeps one queued run, so the next run starts right after
+          # this one. watch.sh uses conditional requests (304s are free) and posts on a hit.
+          LOOP_SECONDS: "290"
+          POLL_SECONDS: "1"
         run: |
           ./proposal-bot/post.sh
           end=$((SECONDS + LOOP_SECONDS))
@@ -56,16 +60,25 @@ jobs:
               DISPATCH_ACTION=none ./proposal-bot/post.sh
             fi
           done
-      - name: Commit state back to private repo
+      - name: Commit state back to Dscan
         working-directory: content
         run: |
-          git add -A
-          if git diff --cached --quiet; then
+          # post.sh rewrites last_run_at every run; commit only real transitions.
+          same_state() {
+            [[ "$(git show HEAD:proposal-bot/state.json | jq -S 'del(.last_run_at)')" == \
+               "$(jq -S 'del(.last_run_at)' proposal-bot/state.json)" ]]
+          }
+          if git diff --quiet HEAD -- proposals && same_state; then
             echo "No state changes."
             exit 0
           fi
+          git add -A proposal-bot proposals
           git -c user.name="proposal-poster" -c user.email="proposal-poster@users.noreply.github.com" \
             commit -m "proposal-poster: update state $(date -u +%FT%TZ)"
-          git push
-
-
+          # Dscan sessions and the daily scan push to main too: rebase and retry.
+          for i in 1 2 3; do
+            git pull --rebase -q origin HEAD && git push origin HEAD && exit 0
+            sleep $((i * 2))
+          done
+          echo "Push failed after 3 attempts." >&2
+          exit 1
