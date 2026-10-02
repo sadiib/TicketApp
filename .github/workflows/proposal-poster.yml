@@ -40,7 +40,7 @@ jobs:
         working-directory: content
         env:
           GH_TOKEN: ${{ secrets.M00RISH_PAT }}
-          MODE: ${{ github.event.inputs.mode || vars.POSTER_MODE || 'dry-run' }}
+          MODE: ${{ github.event.inputs.mode || (github.event_name == 'repository_dispatch' && 'post') || 'dry-run' }}
           DISPATCH_ACTION: ${{ github.event.inputs.action || 'none' }}
           DISPATCH_ISSUE: ${{ github.event.inputs.issue_number || '' }}
           DISPATCH_BODY: ${{ github.event.inputs.proposal_body || '' }}
