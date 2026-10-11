@@ -21,7 +21,7 @@ on:
         required: false
         default: ""
 concurrency:
-  group: proposal-poster
+  group: proposal-poster-${{ github.event_name == 'workflow_dispatch' && 'manual' || ((endsWith(format('{0}', github.run_number), '0') || endsWith(format('{0}', github.run_number), '2') || endsWith(format('{0}', github.run_number), '4') || endsWith(format('{0}', github.run_number), '6') || endsWith(format('{0}', github.run_number), '8')) && 'a' || 'b') }}
   cancel-in-progress: false
 jobs:
   run:
@@ -40,20 +40,28 @@ jobs:
         working-directory: content
         env:
           GH_TOKEN: ${{ secrets.M00RISH_PAT }}
+          DSCAN_TOKEN: ${{ secrets.DSCAN_PAT }}
           MODE: ${{ github.event.inputs.mode || (github.event_name == 'repository_dispatch' && 'post') || 'dry-run' }}
           DISPATCH_ACTION: ${{ github.event.inputs.action || 'none' }}
           DISPATCH_ISSUE: ${{ github.event.inputs.issue_number || '' }}
           DISPATCH_BODY: ${{ github.event.inputs.proposal_body || '' }}
           GITHUB_STEP_SUMMARY: ""
-          # Each run polls for ~5 minutes; cron-job.org dispatches every minute and the
-          # concurrency group keeps one queued run, so the next run starts right after
-          # this one. watch.sh uses conditional requests (304s are free) and posts on a hit.
-          LOOP_SECONDS: "290"
+          # Lane b hands over 150s after lane a. Each run polls until its lane's next
+          # 5-minute mark (at least 150s), so handovers never line up.
+          LANE_OFFSET: ${{ (endsWith(format('{0}', github.run_number), '0') || endsWith(format('{0}', github.run_number), '2') || endsWith(format('{0}', github.run_number), '4') || endsWith(format('{0}', github.run_number), '6') || endsWith(format('{0}', github.run_number), '8')) && '0' || '150' }}
           POLL_SECONDS: "1"
         run: |
+          now=$(date +%s)
+          end=$(( (now - LANE_OFFSET) / 300 * 300 + LANE_OFFSET + 300 ))
+          (( end - now < 150 )) && end=$((end + 300))
+          echo "Lane offset ${LANE_OFFSET}s: polling until $(date -u -d "@$end" +%T) UTC"
+          if [[ "$MODE" == "post" ]]; then
+            ./proposal-bot/lock.sh prepare
+          else
+            ./proposal-bot/lock.sh selftest || echo "::warning::lock selftest failed; check DSCAN_PAT (Contents read/write on M00rish/Dscan)"
+          fi
           ./proposal-bot/post.sh
-          end=$((SECONDS + LOOP_SECONDS))
-          while (( SECONDS + POLL_SECONDS < end )); do
+          while (( $(date +%s) + POLL_SECONDS < end )); do
             sleep "$POLL_SECONDS"
             if ./proposal-bot/watch.sh; then
               # The dispatch action (re-arm) only applies to the first run above.
@@ -62,23 +70,4 @@ jobs:
           done
       - name: Commit state back to Dscan
         working-directory: content
-        run: |
-          # post.sh rewrites last_run_at every run; commit only real transitions.
-          same_state() {
-            [[ "$(git show HEAD:proposal-bot/state.json | jq -S 'del(.last_run_at)')" == \
-               "$(jq -S 'del(.last_run_at)' proposal-bot/state.json)" ]]
-          }
-          if git diff --quiet HEAD -- proposals && same_state; then
-            echo "No state changes."
-            exit 0
-          fi
-          git add -A proposal-bot proposals
-          git -c user.name="proposal-poster" -c user.email="proposal-poster@users.noreply.github.com" \
-            commit -m "proposal-poster: update state $(date -u +%FT%TZ)"
-          # Dscan sessions and the daily scan push to main too: rebase and retry.
-          for i in 1 2 3; do
-            git pull --rebase -q origin HEAD && git push origin HEAD && exit 0
-            sleep $((i * 2))
-          done
-          echo "Push failed after 3 attempts." >&2
-          exit 1
+        run: ./proposal-bot/save-state.sh
